@@ -1,0 +1,355 @@
+from pathlib import Path
+from threading import Thread
+from typing import Any
+from typing import Literal
+
+from fastapi import APIRouter
+from fastapi import File
+from fastapi import HTTPException
+from fastapi import UploadFile
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from pydantic import ConfigDict
+from pydantic import Field
+
+from backend.database import create_run
+from backend.database import get_connection
+from backend.database import get_image_file_metadata_from_database
+from backend.database import get_run_model_file_name
+from backend.database import get_run_info_from_detection_id
+from backend.database import get_run_from_database
+from backend.database import link_image_to_run
+from backend.database import list_run_image_ids
+from backend.database import list_runs_from_database
+from backend.database import recalculate_run_image_mussel_counts_from_detections
+from backend.database import recalculate_run_mussel_counts_from_detections
+from backend.database import run_exists
+from backend.database import unlink_image_from_run
+from backend.database import update_detection_fields
+from backend.database import update_run_model_file_name
+from backend.database import update_run_mussel_count
+from backend.database import update_run_threshold
+from backend.image_ingest import ingest_image_into_database
+from backend.inference import run_rcnn_inference_for_run_images
+from backend.inference_jobs import complete_inference_job
+from backend.inference_jobs import create_inference_job
+from backend.inference_jobs import fail_inference_job
+from backend.inference_jobs import get_inference_job
+from backend.inference_jobs import update_inference_job_progress
+from backend.model_store import list_models_from_disk
+
+router = APIRouter()
+
+
+class predictrequest(BaseModel):
+    run_id: int | None = None
+    image_ids: list[int] = Field(default_factory=list)
+    image_paths: list[str] = Field(default_factory=list)
+    model_file_name: str
+    threshold_score: float = 0.5
+
+
+class RecalculateRequest(BaseModel):
+    run_id: int
+    threshold_score: float
+
+
+class DetectionPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    class_name: Literal["live", "dead"] | None = None
+    is_deleted: bool | None = None
+
+
+def _run_inference_job_in_background(
+    inference_job_id: str,
+    run_id: int,
+    run_image_ids_to_process: list[int],
+    model_file_name: str,
+    threshold_score: float,
+) -> None:
+    """Execute inference job work and update in-memory job progress state."""
+    try:
+        with get_connection() as connection:
+            run_rcnn_inference_for_run_images(
+                connection=connection,
+                run_image_ids=run_image_ids_to_process,
+                model_file_name=model_file_name,
+                threshold_score=threshold_score,
+                on_run_image_processed=lambda processed_images, total_images: update_inference_job_progress(
+                    inference_job_id,
+                    processed_images,
+                    total_images,
+                ),
+            )
+            update_run_mussel_count(connection, run_id)
+            connection.commit()
+            run_data = get_run_from_database(connection, run_id)
+
+        if run_data is None:
+            raise RuntimeError("Failed to load run after inference completion")
+
+        complete_inference_job(inference_job_id, run_data)
+    except Exception as error:
+        fail_inference_job(inference_job_id, str(error))
+
+
+@router.post("/predict")
+def create_or_update_run_and_do_inference(
+    request: predictrequest,
+) -> dict[str, Any]:
+    """Create or update a run, start async inference, and return job metadata."""
+    if request.run_id is None and not request.image_paths and not request.image_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="image_paths or image_ids cannot be empty for new runs",
+        )
+
+    skipped_images: list[str] = []
+    skipped_image_ids: list[int] = []
+    invalid_image_ids: list[int] = []
+    new_images_for_this_run: list[int] = []
+    is_running_on_new_images_only = True
+    run_data: dict[str, Any] | None = None
+
+    with get_connection() as connection:
+        if request.run_id is None:
+            run_id = create_run(connection, request.model_file_name, request.threshold_score)
+            model_changed = False
+        else:
+            if not run_exists(connection, request.run_id):
+                raise HTTPException(status_code=404, detail="Run not found")
+            run_id = request.run_id
+            requested_run_model_file_name = get_run_model_file_name(connection, run_id)
+            model_changed = requested_run_model_file_name != request.model_file_name
+            if model_changed:
+                update_run_model_file_name(connection, run_id, request.model_file_name)
+                is_running_on_new_images_only = False
+
+        update_run_threshold(connection, run_id, request.threshold_score)
+
+        for image_path in request.image_paths:
+            try:
+                image = ingest_image_into_database(connection, image_path)
+            except FileNotFoundError as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+
+            run_image_id, inserted_without_error = link_image_to_run(
+                connection, run_id, image["image_id"]
+            )
+            if not inserted_without_error:
+                skipped_images.append(image_path)
+                continue
+
+            new_images_for_this_run.append(run_image_id)
+
+        for image_id in request.image_ids:
+            image_file_metadata = get_image_file_metadata_from_database(connection, image_id)
+            if image_file_metadata is None:
+                invalid_image_ids.append(image_id)
+                continue
+
+            run_image_id, inserted_without_error = link_image_to_run(
+                connection,
+                run_id,
+                int(image_file_metadata["id"]),
+            )
+            if not inserted_without_error:
+                skipped_image_ids.append(image_id)
+                continue
+
+            new_images_for_this_run.append(run_image_id)
+
+        if model_changed:
+            run_image_ids_to_process = list_run_image_ids(connection, run_id)
+        else:
+            run_image_ids_to_process = new_images_for_this_run
+
+        update_run_mussel_count(connection, run_id)
+        connection.commit()
+        if not run_image_ids_to_process:
+            run_data = get_run_from_database(connection, run_id)
+
+    inference_job_data = create_inference_job(
+        run_id=run_id,
+        total_images=len(run_image_ids_to_process),
+        skipped_images=skipped_images,
+        skipped_image_ids=skipped_image_ids,
+        invalid_image_ids=invalid_image_ids,
+        model_changed=model_changed,
+        is_running_on_new_images_only=is_running_on_new_images_only,
+        processed_run_image_ids=run_image_ids_to_process,
+    )
+
+    if not run_image_ids_to_process:
+        if run_data is None:
+            raise HTTPException(status_code=500, detail="Failed to load run")
+        complete_inference_job(inference_job_data["job_id"], run_data)
+        completed_inference_job_data = get_inference_job(inference_job_data["job_id"])
+        if completed_inference_job_data is None:
+            raise HTTPException(status_code=500, detail="Failed to load inference job")
+        return completed_inference_job_data
+
+    inference_thread = Thread(
+        target=_run_inference_job_in_background,
+        args=(
+            inference_job_data["job_id"],
+            run_id,
+            run_image_ids_to_process,
+            request.model_file_name,
+            request.threshold_score,
+        ),
+        daemon=True,
+    )
+    inference_thread.start()
+    return inference_job_data
+
+
+@router.get("/predict/jobs/{inference_job_id}")
+def get_predict_job(inference_job_id: str) -> dict[str, Any]:
+    """Return one inference job state, including progress and final run data when done."""
+    inference_job_data = get_inference_job(inference_job_id)
+    if inference_job_data is None:
+        raise HTTPException(status_code=404, detail="Inference job not found")
+    return inference_job_data
+
+
+@router.post("/recalculate")
+def recalculate_mussel_counts(request: RecalculateRequest) -> dict[str, Any]:
+    """Recompute counts for an existing run from stored detections only."""
+    with get_connection() as connection:
+        if not run_exists(connection, request.run_id):
+            raise HTTPException(status_code=404, detail="Run not found")
+
+        update_run_threshold(connection, request.run_id, request.threshold_score)
+        recalculate_run_mussel_counts_from_detections(
+            connection, request.run_id, request.threshold_score
+        )
+        connection.commit()
+        run_data = get_run_from_database(connection, request.run_id)
+
+    if run_data is None:
+        raise HTTPException(status_code=500, detail="Failed to load run")
+
+    return {"run": run_data}
+
+
+@router.patch("/detections/{detection_id}")
+def edit_detection_in_database(detection_id: int, request: DetectionPatchRequest) -> dict[str, Any]:
+    """Partially update one detection and refresh cached counts."""
+    fields_to_update = request.model_dump(exclude_unset=True)
+    if not fields_to_update:
+        raise HTTPException(status_code=400, detail="No detection fields provided")
+
+    with get_connection() as connection:
+        run_information = get_run_info_from_detection_id(connection, detection_id)
+        if run_information is None:
+            raise HTTPException(status_code=404, detail="Detection not found")
+
+        if "is_deleted" in fields_to_update:
+            fields_to_update["is_deleted"] = 1 if fields_to_update["is_deleted"] else 0
+        fields_to_update["is_edited"] = 1
+
+        update_detection_fields(connection, detection_id, fields_to_update)
+        recalculate_run_image_mussel_counts_from_detections(
+            connection,
+            run_image_id=int(run_information["run_image_id"]),
+            threshold_score=float(run_information["threshold_score"]),
+        )
+        update_run_mussel_count(connection, int(run_information["run_id"]))
+        connection.commit()
+        run_data = get_run_from_database(connection, int(run_information["run_id"]))
+
+    if run_data is None:
+        raise HTTPException(status_code=500, detail="Failed to load run")
+
+    return {"run": run_data}
+
+
+@router.delete("/runs/{run_id}/images/{run_image_id}")
+def remove_image_from_run(run_id: int, run_image_id: int) -> dict[str, Any]:
+    """Unlink an image from a run and recalculate counts."""
+    with get_connection() as connection:
+        if not run_exists(connection, run_id):
+            raise HTTPException(status_code=404, detail="Run not found")
+
+        deleted = unlink_image_from_run(connection, run_id, run_image_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Image not found in run")
+
+        update_run_mussel_count(connection, run_id)
+        connection.commit()
+        run_data = get_run_from_database(connection, run_id)
+
+    if run_data is None:
+        raise HTTPException(status_code=500, detail="Failed to load run")
+
+    return {"run": run_data}
+
+
+@router.get("/runs")
+def list_runs() -> list[dict[str, Any]]:
+    """Return the run history list."""
+    with get_connection() as connection:
+        return list_runs_from_database(connection)
+
+
+@router.get("/runs/{run_id}")
+def get_run(run_id: int) -> dict[str, Any]:
+    """Return one run with nested images and detections."""
+    with get_connection() as connection:
+        run_data = get_run_from_database(connection, run_id)
+    if run_data is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run_data
+
+
+@router.get("/models")
+def list_models() -> dict[str, Any]:
+    """Return model files available in the on-disk model directory."""
+    return list_models_from_disk()
+
+
+@router.post("/images/upload")
+def upload_images(files: list[UploadFile] = File(...)) -> dict[str, Any]:
+    """Upload images into the images table without linking them to a run."""
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    uploaded_images: list[dict[str, Any]] = []
+    with get_connection() as connection:
+        for uploaded_file in files:
+            displayed_file_name = uploaded_file.filename or "uploaded_image"
+            file_bytes = uploaded_file.file.read()
+            uploaded_file.file.close()
+            if not file_bytes:
+                raise HTTPException(status_code=400, detail=f"Empty file: {displayed_file_name}")
+
+            uploaded_image = ingest_image_into_database(
+                connection,
+                displayed_file_name=displayed_file_name,
+                file_bytes=file_bytes,
+            )
+            uploaded_images.append(uploaded_image)
+
+        connection.commit()
+
+    return {"images": uploaded_images}
+
+
+@router.get("/images/{image_id}", response_class=FileResponse)
+def get_image(image_id: int) -> FileResponse:
+    """Return one stored image file by image ID."""
+    with get_connection() as connection:
+        image_file_metadata = get_image_file_metadata_from_database(connection, image_id)
+
+    if image_file_metadata is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    image_path = Path(image_file_metadata["stored_path"]).resolve()
+    if not image_path.is_file():
+        raise HTTPException(status_code=404, detail="Image file not found on disk")
+
+    return FileResponse(
+        path=str(image_path),
+        filename=image_file_metadata["displayed_file_name"],
+    )
