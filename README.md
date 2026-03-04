@@ -10,7 +10,7 @@ Desktop app for running mussel detection with an Electron frontend and Python ba
 ## Run Locally (Development on macOS/Linux)
 
 ```bash
-cd MusselCounterSimple
+# while in /MusselCounterSimple
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -21,7 +21,7 @@ npm start
 ## Run Locally (Development on Windows)
 
 ```powershell
-cd MusselCounterSimple
+# while in /MusselCounterSimple
 py -3 -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
@@ -32,7 +32,7 @@ npm start
 ## Build macOS `.dmg` (on macOS)
 
 ```bash
-cd MusselCounterSimple
+# while in /MusselCounterSimple
 source .venv/bin/activate
 pip install -r requirements.txt -r requirements-build.txt
 npm ci
@@ -43,7 +43,7 @@ find out/make -name "*.dmg"
 ## Build Windows `.exe` (on Windows)
 
 ```powershell
-cd MusselCounterSimple
+# while in /MusselCounterSimple
 py -3 -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt -r requirements-build.txt
@@ -56,20 +56,3 @@ Windows installer output will be under:
 ```text
 out\make\squirrel.windows\...
 ```
-
-## Build Windows `.exe` from GitHub Actions
-
-This repo includes a workflow at:
-
-```text
-.github/workflows/build-windows.yml
-```
-
-Run it from **GitHub > Actions > Build Windows Desktop > Run workflow**.
-
-The workflow uploads:
-- `Setup.exe`
-- `.nupkg`
-- `RELEASES`
-
-as an artifact named `windows-build-artifacts`.
