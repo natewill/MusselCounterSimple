@@ -1,3 +1,5 @@
+"""Read-only database helpers for runs, images, and nested response payloads."""
+
 from typing import Any
 
 import sqlite3
@@ -6,7 +8,7 @@ import sqlite3
 def get_image_file_metadata_from_database(
     connection: sqlite3.Connection, image_id: int
 ) -> dict[str, Any] | None:
-    """Return stored file metadata for an image ID."""
+    """Return stored file metadata for one image ID, or `None` if missing."""
     image_file_metadata = connection.execute(
         """
         SELECT
@@ -24,7 +26,10 @@ def get_image_file_metadata_from_database(
 
 
 def get_run_from_database(connection: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
-    """Load one run with its images and detections."""
+    """Return one full run payload (run + images + detections).
+
+    This is the detailed shape used by the run-detail frontend page.
+    """
     run_from_database = connection.execute(
         """
         SELECT
@@ -49,6 +54,7 @@ def get_run_from_database(connection: sqlite3.Connection, run_id: int) -> dict[s
         run_data["live_mussel_count"] + run_data["dead_mussel_count"]
     )
 
+    # Load all images linked to this run, in stable insertion order.
     images_from_database = connection.execute(
         """
         SELECT
@@ -74,6 +80,7 @@ def get_run_from_database(connection: sqlite3.Connection, run_id: int) -> dict[s
         image_data["total_mussels"] = (
             image_data["live_mussel_count"] + image_data["dead_mussel_count"]
         )
+        # Attach detections for each run-image row.
         detections_from_database = connection.execute(
             """
             SELECT
@@ -104,7 +111,7 @@ def get_run_from_database(connection: sqlite3.Connection, run_id: int) -> dict[s
 
 
 def list_runs_from_database(connection: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Return run summaries for history view."""
+    """Return run summary rows for the history/collections view."""
     run_summaries_from_database = connection.execute(
         """
         SELECT
@@ -136,10 +143,13 @@ def list_runs_from_database(connection: sqlite3.Connection) -> list[dict[str, An
         """
     ).fetchall()
 
-    runs_data = [dict(run_summary_from_database) for run_summary_from_database in run_summaries_from_database]
+    runs_data = [
+        dict(run_summary_from_database) for run_summary_from_database in run_summaries_from_database
+    ]
     for run in runs_data:
         run["total_mussels"] = run["live_mussel_count"] + run["dead_mussel_count"]
         preview_image_id = run["preview_image_id"]
+        # Frontend serves previews through the backend image endpoint.
         run["preview_image_url"] = (
             f"/images/{preview_image_id}" if preview_image_id is not None else None
         )

@@ -4,7 +4,7 @@ import hashlib
 import shutil
 import sqlite3
 
-from backend.init_db import IMAGES_DIR
+from backend.init_db import IMAGES_DIRECTORY
 
 
 def compute_sha256(file_path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -79,13 +79,13 @@ def ingest_image_into_database(
         return _image_record_to_dict(existing_image_from_database, was_deduplicated=True)
 
     # First time seeing this image hash: store bytes under a hash-based filename.
-    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    IMAGES_DIRECTORY.mkdir(parents=True, exist_ok=True)
     suffix = (
         Path(displayed_file_name_value).suffix.lower()
         if Path(displayed_file_name_value).suffix
         else ".bin"
     )
-    stored_path = (IMAGES_DIR / f"{sha_256_file_hash}{suffix}").resolve()
+    stored_path = (IMAGES_DIRECTORY / f"{sha_256_file_hash}{suffix}").resolve()
     if not stored_path.exists():
         if image_path is not None:
             shutil.copy2(source_path, stored_path)

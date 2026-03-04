@@ -1,11 +1,8 @@
 """Runtime entrypoint used for packaged backend executable builds."""
 
 from __future__ import annotations
-
 import os
-
 import uvicorn
-
 from backend.main import app
 
 

@@ -1,3 +1,5 @@
+"""Detection update/recalculation helpers built on stored detection rows."""
+
 from typing import Any
 
 import sqlite3
@@ -8,7 +10,7 @@ from backend.db.runs import update_run_mussel_count
 def recalculate_run_mussel_counts_from_detections(
     connection: sqlite3.Connection, run_id: int, threshold_score: float
 ) -> None:
-    """Recalculate per-image counts and refresh run totals from stored detections."""
+    """Recompute all run-image counts for one run, then refresh run totals."""
     run_images_from_database = connection.execute(
         """
         SELECT id
@@ -21,6 +23,7 @@ def recalculate_run_mussel_counts_from_detections(
 
     for run_image_from_database in run_images_from_database:
         run_image_id = int(run_image_from_database["id"])
+        # Recompute each run-image row independently from persisted detections.
         recalculate_run_image_mussel_counts_from_detections(
             connection, run_image_id, threshold_score
         )
@@ -31,7 +34,12 @@ def recalculate_run_mussel_counts_from_detections(
 def recalculate_run_image_mussel_counts_from_detections(
     connection: sqlite3.Connection, run_image_id: int, threshold_score: float
 ) -> None:
-    """Recalculate one run_image live/dead counts from stored detections."""
+    """Recompute one run-image live/dead counts from stored detections.
+
+    Rules:
+    - Ignore `is_deleted = 1` rows.
+    - Count only detections with `confidence_score >= threshold_score`.
+    """
     mussel_counts_from_database = connection.execute(
         """
         SELECT
@@ -70,7 +78,7 @@ def recalculate_run_image_mussel_counts_from_detections(
 def get_run_info_from_detection_id(
     connection: sqlite3.Connection, detection_id: int
 ) -> dict[str, Any] | None:
-    """Return run info for a detection ID."""
+    """Return run context for one detection ID, or `None` if not found."""
     run_information_from_database = connection.execute(
         """
         SELECT
@@ -93,7 +101,10 @@ def get_run_info_from_detection_id(
 def update_detection_fields(
     connection: sqlite3.Connection, detection_id: int, fields_to_update: dict[str, Any]
 ) -> None:
-    """Update a detection with a validated set of fields."""
+    """Update one detection using a validated field subset.
+
+    Allowed fields are limited so API callers cannot mutate unsupported columns.
+    """
     allowed_fields = {
         "class_name",
         "is_edited",
@@ -106,6 +117,7 @@ def update_detection_fields(
     if not fields_to_update:
         return
 
+    # Build dynamic assignment list from validated field names.
     assignments = ", ".join(f"{field_name} = ?" for field_name in fields_to_update.keys())
     values = list(fields_to_update.values()) + [detection_id]
     connection.execute(

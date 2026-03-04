@@ -117,21 +117,21 @@ function waitMilliseconds(durationMilliseconds) {
   return new Promise((resolve) => setTimeout(resolve, durationMilliseconds));
 }
 
-async function pollInferenceJobUntilDone(inferenceJobId) {
+async function pollRunJobUntilDone(runJobId) {
   while (true) {
-    const inferenceJobData = await apiGet(`/predict/jobs/${inferenceJobId}`);
+    const runJobData = await apiGet(`/predict/run-jobs/${runJobId}`);
 
     setInferenceProgress(
-      inferenceJobData.processed_images,
-      inferenceJobData.total_images
+      runJobData.processed_images,
+      runJobData.total_images
     );
 
-    if (inferenceJobData.status === "completed") {
-      return inferenceJobData;
+    if (runJobData.status === "completed") {
+      return runJobData;
     }
 
-    if (inferenceJobData.status === "failed") {
-      throw new Error(inferenceJobData.error_message || "Inference job failed.");
+    if (runJobData.status === "failed") {
+      throw new Error(runJobData.error_message || "Run job failed.");
     }
 
     await waitMilliseconds(350);
@@ -565,12 +565,12 @@ async function runInference() {
     });
 
     let predictionData = predictStartData;
-    if (predictStartData.job_id && predictStartData.status !== "completed") {
-      predictionData = await pollInferenceJobUntilDone(predictStartData.job_id);
+    if (predictStartData.run_job_id && predictStartData.status !== "completed") {
+      predictionData = await pollRunJobUntilDone(predictStartData.run_job_id);
     }
 
     if (predictionData.status === "failed") {
-      throw new Error(predictionData.error_message || "Inference job failed.");
+      throw new Error(predictionData.error_message || "Run job failed.");
     }
 
     if (!predictionData.run) {

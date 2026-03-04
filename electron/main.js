@@ -1,3 +1,14 @@
+/**
+ * Electron main-process entrypoint.
+ *
+ * If you are new to Electron:
+ * - The "main process" is the Node.js process that controls the desktop app lifecycle.
+ * - The "renderer process" is the browser-like UI window that runs your frontend code.
+ * - This file starts/stops the Python backend API, creates the app window, and exposes
+ *   a small IPC API (`ipcMain.handle(...)`) so the renderer can ask the main process to
+ *   do privileged work (filesystem, dialogs, backend proxy requests).
+ */
+
 const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
@@ -17,17 +28,21 @@ let mainWindow = null;
 let backendPort = DEFAULT_API_PORT;
 let backendBaseUrl = `http://${API_HOST}:${DEFAULT_API_PORT}`;
 
+/** Pause execution for a fixed number of milliseconds. */
 function waitMilliseconds(durationMilliseconds) {
   return new Promise((resolve) => {
     setTimeout(resolve, durationMilliseconds);
   });
 }
 
+/**
+ * Select the Python command used in development mode.
+ *
+ * Priority:
+ * 1) Project virtualenv (`.venv`)
+ * 2) System Python command (`python` on Windows, `python3` elsewhere)
+ */
 function getPythonCommand() {
-  if (process.env.PYTHON_BIN) {
-    return process.env.PYTHON_BIN;
-  }
-
   const projectVenvCandidate = process.platform === "win32"
     ? path.join(ROOT_DIR, ".venv", "Scripts", "python.exe")
     : path.join(ROOT_DIR, ".venv", "bin", "python");
@@ -35,19 +50,10 @@ function getPythonCommand() {
     return projectVenvCandidate;
   }
 
-  if (process.env.VIRTUAL_ENV) {
-    const candidate = process.platform === "win32"
-      ? path.join(process.env.VIRTUAL_ENV, "Scripts", "python.exe")
-      : path.join(process.env.VIRTUAL_ENV, "bin", "python");
-
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
   return process.platform === "win32" ? "python" : "python3";
 }
 
+/** Return the packaged backend executable path used in production builds. */
 function getPackagedBackendExecutablePath() {
   const executableName = process.platform === "win32"
     ? "mussel-backend.exe"
@@ -55,6 +61,7 @@ function getPackagedBackendExecutablePath() {
   return path.join(process.resourcesPath, "dist", executableName);
 }
 
+/** Test whether a TCP port is currently free on localhost. */
 function isPortAvailable(port) {
   return new Promise((resolve) => {
     const testServer = net.createServer();
@@ -75,6 +82,7 @@ function isPortAvailable(port) {
   });
 }
 
+/** Find the first available backend port, starting at 8000. */
 async function findAvailableBackendPort() {
   for (let offset = 0; offset < MAX_PORT_SCAN_COUNT; offset += 1) {
     const candidatePort = DEFAULT_API_PORT + offset;
@@ -90,11 +98,17 @@ async function findAvailableBackendPort() {
   );
 }
 
+/**
+ * Start the backend server process (packaged binary or dev uvicorn command).
+ *
+ * This function is idempotent: if already running, it returns immediately.
+ */
 async function startBackendServer() {
   if (backendProcess) {
     return;
   }
 
+  // Use a free local port so startup still works when 8000 is occupied.
   backendPort = await findAvailableBackendPort();
   backendBaseUrl = `http://${API_HOST}:${backendPort}`;
   if (backendPort !== DEFAULT_API_PORT) {
@@ -103,6 +117,7 @@ async function startBackendServer() {
     );
   }
 
+  // Packaged app: run prebuilt backend executable bundled in app resources.
   if (app.isPackaged) {
     const executablePath = getPackagedBackendExecutablePath();
     if (!fs.existsSync(executablePath)) {
@@ -122,6 +137,7 @@ async function startBackendServer() {
       stdio: "pipe",
     });
   } else {
+    // Development mode: run backend directly with Python + Uvicorn.
     const pythonCommand = getPythonCommand();
     backendProcess = spawn(
       pythonCommand,
@@ -134,6 +150,7 @@ async function startBackendServer() {
     );
   }
 
+  // Forward backend logs to Electron process output for easier debugging.
   backendProcess.stdout.on("data", (chunk) => {
     process.stdout.write(`[backend] ${chunk}`);
   });
@@ -154,6 +171,7 @@ async function startBackendServer() {
   });
 }
 
+/** Probe backend health by calling `/models`. */
 async function isBackendReady() {
   try {
     const response = await fetch(`${backendBaseUrl}/models`);
@@ -163,6 +181,7 @@ async function isBackendReady() {
   }
 }
 
+/** Wait until backend responds successfully or timeout expires. */
 async function waitForBackendReady() {
   const startupDeadline = Date.now() + BACKEND_STARTUP_TIMEOUT_MS;
 
@@ -183,6 +202,7 @@ async function waitForBackendReady() {
   throw new Error("Backend did not become ready in time.");
 }
 
+/** Stop backend process if one is currently running. */
 function stopBackendServer() {
   if (!backendProcess) {
     return;
@@ -193,6 +213,7 @@ function stopBackendServer() {
   }
 }
 
+/** Create the main application window and load the frontend HTML. */
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -214,14 +235,17 @@ function createWindow() {
   });
 }
 
+// IPC endpoint: renderer asks for current backend base URL.
 ipcMain.handle("backend:base-url", async () => {
   return backendBaseUrl;
 });
 
+// IPC endpoint: renderer asks if backend is responding.
 ipcMain.handle("backend:is-ready", async () => {
   return isBackendReady();
 });
 
+// IPC endpoint: renderer sends API requests; main process proxies them to backend.
 ipcMain.handle("backend:request", async (_event, request) => {
   const method = String(request?.method ?? "GET").toUpperCase();
   const apiPath = String(request?.apiPath ?? "/");
@@ -241,6 +265,7 @@ ipcMain.handle("backend:request", async (_event, request) => {
   const response = await fetch(url, options);
   const responseText = await response.text();
 
+  // Try JSON first; fall back to plain text.
   let responseData = null;
   if (responseText) {
     try {
@@ -251,6 +276,7 @@ ipcMain.handle("backend:request", async (_event, request) => {
   }
 
   if (!response.ok) {
+    // Normalize backend error payload to a readable desktop error message.
     const detail = responseData && typeof responseData === "object" && "detail" in responseData
       ? responseData.detail
       : responseData;
@@ -262,6 +288,7 @@ ipcMain.handle("backend:request", async (_event, request) => {
   return responseData;
 });
 
+// IPC endpoint: open native file picker for model files and copy selected model into models dir.
 ipcMain.handle("dialog:pick-model", async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: "Select Model File",
@@ -279,7 +306,7 @@ ipcMain.handle("dialog:pick-model", async () => {
   const sourcePath = result.filePaths[0];
   const fileName = path.basename(sourcePath);
 
-  // Get models dir from backend API
+  // Ask backend where model files should live on this machine.
   let modelsDir;
   try {
     const response = await fetch(`${backendBaseUrl}/models`);
@@ -298,6 +325,7 @@ ipcMain.handle("dialog:pick-model", async () => {
   return { fileName, alreadyExists: false };
 });
 
+// IPC endpoint: open native file picker for input images.
 ipcMain.handle("dialog:pick-images", async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: "Select Mussel Images",
@@ -314,6 +342,10 @@ ipcMain.handle("dialog:pick-images", async () => {
   return result.filePaths;
 });
 
+// App startup sequence:
+// 1) start backend
+// 2) wait until it is reachable
+// 3) create the UI window
 app.whenReady().then(async () => {
   try {
     await startBackendServer();
@@ -325,6 +357,7 @@ app.whenReady().then(async () => {
     return;
   }
 
+  // macOS convention: clicking dock icon should reopen a window.
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -332,10 +365,12 @@ app.whenReady().then(async () => {
   });
 });
 
+// Ensure backend is terminated when app is quitting.
 app.on("before-quit", () => {
   stopBackendServer();
 });
 
+// On macOS apps usually stay open without windows; other platforms quit.
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();

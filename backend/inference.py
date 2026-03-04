@@ -1,63 +1,40 @@
-"""Faster R-CNN inference adapter and DB writeback helpers."""
+"""Faster R-CNN inference + database writeback helpers.
+
+This module handles the full backend inference path:
+- Resolve and validate the requested model file path.
+- Load and cache the RCNN model by file modified-time.
+- Run per-image inference and normalize detections into DB-friendly fields.
+- Replace detections/counts for each `run_images` row being processed.
+"""
 
 from collections import OrderedDict
-from contextlib import contextmanager
-import ctypes
-import io
-import os
 from pathlib import Path
-import sys
 from typing import Callable
 from typing import Any
 import sqlite3
 
-
-@contextmanager
-def _suppress_stderr():
-    """Temporarily silence C-level stderr (libjpeg warnings)."""
-    try:
-        stderr_fd = sys.stderr.fileno()
-        old_stderr = os.dup(stderr_fd)
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(devnull, stderr_fd)
-        os.close(devnull)
-        yield
-        os.dup2(old_stderr, stderr_fd)
-        os.close(old_stderr)
-    except (OSError, io.UnsupportedOperation):
-        yield
-
-
-try:
-    from PIL import Image
-    import torch
-    import torchvision
-    import torchvision.transforms as transforms
-except ImportError:  # pragma: no cover - handled at runtime by explicit checks
-    Image = None
-    torch = None
-    torchvision = None
-    transforms = None
+from PIL import Image
+import torch
+import torchvision
+import torchvision.transforms as transforms
 
 
 RCNN_LABELS = {
     1: "live",
     2: "dead",
 }
+# Cache key: absolute model path.
+# Cache value: (file modified_time, loaded_model, device).
 MODEL_CACHE: dict[str, tuple[float, Any, Any]] = {}
 
 
-def _ensure_torch_installed() -> None:
-    """Validate runtime dependencies required for RCNN inference."""
-    if torch is None or torchvision is None or transforms is None or Image is None:
-        raise RuntimeError(
-            "RCNN inference requires torch, torchvision, and pillow. "
-            "Install dependencies from requirements.txt."
-        )
-
-
 def _model_file_name_to_absolute_path(model_file_name: str) -> Path:
-    """Resolve and validate an absolute model path."""
+    """Return a validated absolute model path for inference.
+
+    Requirements:
+    - Input must already be absolute (frontend provides full path).
+    - File must exist on disk.
+    """
     expanded_path = Path(model_file_name).expanduser()
     if not expanded_path.is_absolute():
         raise ValueError(f"model_file_name must be an absolute path: {model_file_name}")
@@ -68,16 +45,20 @@ def _model_file_name_to_absolute_path(model_file_name: str) -> Path:
 
 
 def _load_model(model_path: Path) -> tuple[Any, Any]:
-    """Load a serialized RCNN model and return (model, device)."""
-    _ensure_torch_installed()
+    """Load RCNN weights from disk and return `(model, device)`.
 
+    Supported checkpoint layouts:
+    - Raw state-dict object
+    - Dict containing `model_state_dict`
+    - Dict containing `state_dict`
+    """
     # Pick GPU when available; otherwise run on CPU.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Load checkpoint on the target device.
     checkpoint = torch.load(str(model_path), map_location=device)
 
-    # Support common checkpoint layouts.
+    # Support common checkpoint layouts without requiring re-export.
     if isinstance(checkpoint, dict):
         if "model_state_dict" in checkpoint:
             state_dict = checkpoint["model_state_dict"]
@@ -96,7 +77,7 @@ def _load_model(model_path: Path) -> tuple[Any, Any]:
     for key, value in state_dict.items():
         normalized_state_dict[key.removeprefix("module.")] = value
 
-    # This project uses a fixed 3-class RCNN head: background/live/dead.
+    # This project uses a fixed 3-class head: background, live, dead.
     model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
         weights=None,
         weights_backbone=None,
@@ -113,7 +94,10 @@ def _load_model(model_path: Path) -> tuple[Any, Any]:
 
 
 def _get_model_device(model_file_name: str) -> tuple[Any, Any]:
-    """Return a cached (model, device) for a model file, reloading when file changes."""
+    """Return cached `(model, device)` and reload only when model file changed.
+
+    The cache invalidates using file modified-time (`st_mtime`).
+    """
     model_path = _model_file_name_to_absolute_path(model_file_name)
     cache_key = str(model_path)
     modified_time = model_path.stat().st_mtime
@@ -128,15 +112,19 @@ def _get_model_device(model_file_name: str) -> tuple[Any, Any]:
 
 
 def _run_rcnn_inference(model_device_tuple: tuple[Any, Any], image_path: str) -> list[dict[str, Any]]:
-    """Run RCNN inference for one image and return standardized detections."""
-    _ensure_torch_installed()
+    """Run RCNN on one image and return standardized detection records.
+
+    Output records are normalized to the detection table fields:
+    `class_name`, `confidence_score`, and `bbox_x1..bbox_y2`.
+    """
     model, device = model_device_tuple
     transform = transforms.ToTensor()
 
-    with _suppress_stderr():
-        image = Image.open(image_path).convert("RGB")
+    # PIL -> tensor on target device.
+    image = Image.open(image_path).convert("RGB")
     tensor = transform(image).to(device)
 
+    # TorchVision detectors expect a list of tensors and return a list of dicts.
     with torch.no_grad():
         prediction = model([tensor])[0]
 
@@ -147,6 +135,7 @@ def _run_rcnn_inference(model_device_tuple: tuple[Any, Any], image_path: str) ->
     detections: list[dict[str, Any]] = []
     for box, score, label in zip(boxes, scores, labels):
         class_name = RCNN_LABELS.get(int(label))
+        # Ignore labels outside this app's live/dead mapping.
         if class_name is None:
             continue
         detections.append(
@@ -160,6 +149,7 @@ def _run_rcnn_inference(model_device_tuple: tuple[Any, Any], image_path: str) ->
             }
         )
 
+    # Keep GPU memory stable across repeated inference calls.
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
@@ -173,12 +163,22 @@ def run_rcnn_inference_for_run_images(
     threshold_score: float,
     on_run_image_processed: Callable[[int, int], None] | None = None,
 ) -> None:
-    """Run RCNN inference for selected run_images and refresh cached counts."""
+    """Run inference for selected `run_images` rows and write results to DB.
+
+    For each `run_image_id`:
+    - Load image path from DB.
+    - Delete old detections for that run-image row.
+    - Insert new detections from model output.
+    - Recompute thresholded live/dead counts for the run-image row.
+
+    A progress callback can be provided for frontend polling state.
+    """
     if not run_image_ids:
         return
 
     model_device_tuple = _get_model_device(model_file_name)
     placeholders = ",".join(["?"] * len(run_image_ids))
+    # Pull run-image rows with physical file path for inference.
     run_images_from_database = connection.execute(
         f"""
         SELECT
@@ -198,6 +198,7 @@ def run_rcnn_inference_for_run_images(
         image_path = str(run_image_from_database["stored_path"])
         detections = _run_rcnn_inference(model_device_tuple, image_path)
 
+        # Replace prior detections so reruns are deterministic per run-image row.
         connection.execute(
             """
             DELETE FROM detections
@@ -210,6 +211,7 @@ def run_rcnn_inference_for_run_images(
         dead_mussel_count = 0
 
         for detection in detections:
+            # Persist every raw detection; threshold only affects aggregate counters.
             connection.execute(
                 """
                 INSERT INTO detections (
@@ -242,6 +244,7 @@ def run_rcnn_inference_for_run_images(
                 elif detection["class_name"] == "dead":
                     dead_mussel_count += 1
 
+        # Store per-image counters used by run-level aggregate queries.
         connection.execute(
             """
             UPDATE run_images
@@ -254,4 +257,5 @@ def run_rcnn_inference_for_run_images(
         )
 
         if on_run_image_processed is not None:
+            # Frontend progress: (processed so far, total to process).
             on_run_image_processed(processed_images, total_images_to_process)

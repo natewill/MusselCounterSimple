@@ -2,15 +2,15 @@ from datetime import datetime
 from datetime import timezone
 from typing import Any
 
-from backend.init_db import MODELS_DIR
+from backend.init_db import MODELS_DIRECTORY
 
 
 def list_models_from_disk() -> dict[str, Any]:
     """Return model directory metadata and all model files found on disk."""
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    MODELS_DIRECTORY.mkdir(parents=True, exist_ok=True)
 
     models: list[dict[str, Any]] = []
-    for path in sorted(MODELS_DIR.iterdir()):
+    for path in sorted(MODELS_DIRECTORY.iterdir()):
         if not path.is_file():
             continue
         stat = path.stat()
@@ -24,6 +24,6 @@ def list_models_from_disk() -> dict[str, Any]:
         )
 
     return {
-        "models_dir": str(MODELS_DIR.resolve()),
+        "models_dir": str(MODELS_DIRECTORY.resolve()),
         "models": models,
     }

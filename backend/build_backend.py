@@ -1,4 +1,5 @@
-"""Build the packaged backend executable with PyInstaller."""
+"""Build a standalone backend binary for desktop packaging so end users do not need Python
+installed."""
 
 from __future__ import annotations
 
@@ -7,19 +8,22 @@ import subprocess
 import sys
 
 
-BACKEND_DIR = Path(__file__).resolve().parent
-SERVER_ENTRY = BACKEND_DIR / "server_entry.py"
-DIST_DIR = BACKEND_DIR / "dist"
-BUILD_DIR = BACKEND_DIR / "build"
-SPEC_DIR = BACKEND_DIR
-SCHEMA_PATH = BACKEND_DIR / "schema.sql"
+# Keep build paths relative to this file so command behavior is stable from any current working directory.
+BACKEND_DIRECTORY = Path(__file__).resolve().parent
+SERVER_ENTRY = BACKEND_DIRECTORY / "server_entry.py"
+DIST_DIRECTORY = BACKEND_DIRECTORY / "dist"
+BUILD_DIRECTORY = BACKEND_DIRECTORY / "build"
+SPEC_DIRECTORY = BACKEND_DIRECTORY
+SCHEMA_PATH = BACKEND_DIRECTORY / "schema.sql"
 
 
 def build_backend_executable() -> None:
     """Create a one-file backend executable for Electron packaged builds."""
+    # PyInstaller expects different path separators for --add-data on Windows vs POSIX.
     add_data_separator = ";" if sys.platform.startswith("win") else ":"
     add_data_arg = f"{SCHEMA_PATH}{add_data_separator}backend"
 
+    # Build one standalone binary and include schema.sql so DB init works in packaged mode.
     command = [
         sys.executable,
         "-m",
@@ -30,13 +34,14 @@ def build_backend_executable() -> None:
         "--name",
         "mussel-backend",
         "--distpath",
-        str(DIST_DIR),
+        str(DIST_DIRECTORY),
         "--workpath",
-        str(BUILD_DIR),
+        str(BUILD_DIRECTORY),
         "--specpath",
-        str(SPEC_DIR),
+        str(SPEC_DIRECTORY),
         "--add-data",
         add_data_arg,
+        # Uvicorn uses dynamic imports; these keep packaging deterministic.
         "--hidden-import",
         "uvicorn.logging",
         "--hidden-import",
@@ -50,6 +55,7 @@ def build_backend_executable() -> None:
         str(SERVER_ENTRY),
     ]
 
+    # Fail fast if PyInstaller returns non-zero so CI/build scripts stop immediately.
     subprocess.run(command, check=True)
 
 

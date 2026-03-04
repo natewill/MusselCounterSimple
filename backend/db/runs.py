@@ -1,8 +1,10 @@
+"""Run-write helpers: create/update runs and manage run-image links."""
+
 import sqlite3
 
 
 def create_run(connection: sqlite3.Connection, model_file_name: str, threshold_score: float) -> int:
-    """Insert a new run and return its ID."""
+    """Insert a new run row and return its numeric ID."""
     cursor = connection.execute(
         """
         INSERT INTO runs (model_file_name, threshold_score)
@@ -14,7 +16,7 @@ def create_run(connection: sqlite3.Connection, model_file_name: str, threshold_s
 
 
 def run_exists(connection: sqlite3.Connection, run_id: int) -> bool:
-    """Return True when a run with the given ID exists."""
+    """Return `True` when a run with the provided ID exists."""
     run_from_database = connection.execute(
         """
         SELECT id
@@ -27,7 +29,10 @@ def run_exists(connection: sqlite3.Connection, run_id: int) -> bool:
 
 
 def link_image_to_run(connection: sqlite3.Connection, run_id: int, image_id: int) -> tuple[int, bool]:
-    """Link an image to a run and return (run_image_id, was_inserted)."""
+    """Link an image to a run and return `(run_image_id, was_inserted)`.
+
+    If the link already exists, returns the existing `run_images.id` and `False`.
+    """
     existing_run_image_from_database = connection.execute(
         """
         SELECT id
@@ -50,7 +55,8 @@ def link_image_to_run(connection: sqlite3.Connection, run_id: int, image_id: int
 
 
 def update_run_mussel_count(connection: sqlite3.Connection, run_id: int) -> None:
-    """Recalculate cached run totals from run_images."""
+    """Recalculate and persist run-level cached counts from `run_images`."""
+    # Aggregate per-image counts into one run-level totals row.
     run_totals_from_database = connection.execute(
         """
         SELECT
@@ -83,7 +89,7 @@ def update_run_mussel_count(connection: sqlite3.Connection, run_id: int) -> None
 
 
 def get_run_model_file_name(connection: sqlite3.Connection, run_id: int) -> str | None:
-    """Return the model filename stored on a run."""
+    """Return the run's current `model_file_name`, or `None` if run is missing."""
     model_file_name_from_database = connection.execute(
         """
         SELECT model_file_name
@@ -100,7 +106,7 @@ def get_run_model_file_name(connection: sqlite3.Connection, run_id: int) -> str 
 def update_run_model_file_name(
     connection: sqlite3.Connection, run_id: int, model_file_name: str
 ) -> None:
-    """Update the model filename stored on a run."""
+    """Set `model_file_name` for one run and touch `updated_at`."""
     connection.execute(
         """
         UPDATE runs
@@ -112,7 +118,7 @@ def update_run_model_file_name(
 
 
 def update_run_threshold(connection: sqlite3.Connection, run_id: int, threshold_score: float) -> None:
-    """Update the threshold score stored on a run."""
+    """Set `threshold_score` for one run and touch `updated_at`."""
     connection.execute(
         """
         UPDATE runs
@@ -124,7 +130,7 @@ def update_run_threshold(connection: sqlite3.Connection, run_id: int, threshold_
 
 
 def unlink_image_from_run(connection: sqlite3.Connection, run_id: int, run_image_id: int) -> bool:
-    """Delete a run_images row and return True if it existed."""
+    """Delete one run-image link and return whether a row was removed."""
     cursor = connection.execute(
         """
         DELETE FROM run_images
@@ -136,7 +142,7 @@ def unlink_image_from_run(connection: sqlite3.Connection, run_id: int, run_image
 
 
 def list_run_image_ids(connection: sqlite3.Connection, run_id: int) -> list[int]:
-    """Return all run_image IDs for a run."""
+    """Return all `run_images.id` values for one run, ordered ascending."""
     run_images_from_database = connection.execute(
         """
         SELECT id
