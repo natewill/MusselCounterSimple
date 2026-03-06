@@ -43,6 +43,34 @@ npm ci
 npm start
 ```
 
+## Build macOS `.dmg` (on macOS)
+
+```bash
+# while in /MusselCounterSimple
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-build.txt
+npm ci
+npm run make:desktop -- --platform=darwin --arch=arm64
+find out/make -name "*.dmg"
+```
+
+## Build Windows `.exe` (on Windows)
+
+```powershell
+# while in /MusselCounterSimple
+py -3 -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt -r requirements-build.txt
+npm ci
+npm run make:desktop
+```
+
+Windows installer output will be under:
+
+```text
+out\make\squirrel.windows\...
+```
+
 ## How To Use The App
 
 ### Add A Model
@@ -128,32 +156,4 @@ Exit SQLite:
 
 ```sql
 .quit
-```
-
-## Build macOS `.dmg` (on macOS)
-
-```bash
-# while in /MusselCounterSimple
-source .venv/bin/activate
-pip install -r requirements.txt -r requirements-build.txt
-npm ci
-npm run make:desktop -- --platform=darwin --arch=arm64
-find out/make -name "*.dmg"
-```
-
-## Build Windows `.exe` (on Windows)
-
-```powershell
-# while in /MusselCounterSimple
-py -3 -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt -r requirements-build.txt
-npm ci
-npm run make:desktop
-```
-
-Windows installer output will be under:
-
-```text
-out\make\squirrel.windows\...
 ```
