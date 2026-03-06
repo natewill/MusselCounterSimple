@@ -33,17 +33,20 @@ function App() {
   const [isBusy, setIsBusy] = useState(false);
   const [status, setStatus] = useState({ message: "", type: "info" });
   const [loading, setLoading] = useState({ visible: false, processedImages: 0, totalImages: 0 });
-  const [route, setRoute] = useState(() => parseRoute(window.location.hash));
+  const [route, setCurrentRoute] = useState(() => parseRoute(window.location.hash));
   const [bboxVisible, setBboxVisible] = useState(true);
   const [editingDetection, setEditingDetection] = useState(null);
 
-  // Update hash route used by the app pages.
-  const setHashRoute = useCallback((nextRoute) => {
-    if (window.location.hash.replace(/^#/, "") === nextRoute) {
-      setRoute(parseRoute(`#${nextRoute}`));
+  const toErrorMessage = useCallback((error) => String(error?.message ?? error), []);
+
+  // Navigate by updating the URL hash (for example, "#/history").
+  const goToRoute = useCallback((targetRoute) => {
+    const currentRoute = window.location.hash.replace(/^#/, "");
+    if (currentRoute === targetRoute) {
+      setCurrentRoute(parseRoute(`#${targetRoute}`));
       return;
     }
-    window.location.hash = nextRoute;
+    window.location.hash = targetRoute;
   }, []);
 
   // Small API helpers used by hooks and page actions.
@@ -66,6 +69,10 @@ function App() {
     }
     setStatus({ message: String(message), type });
   }, []);
+
+  const showErrorStatus = useCallback((error) => {
+    showStatus(toErrorMessage(error), "error");
+  }, [showStatus, toErrorMessage]);
 
   // Load model options shown in the run settings model dropdown.
   const loadModels = useCallback(async () => {
@@ -139,7 +146,7 @@ function App() {
   // Keep route state in sync with browser hash changes.
   useEffect(() => {
     const handleHashChange = () => {
-      setRoute(parseRoute(window.location.hash));
+      setCurrentRoute(parseRoute(window.location.hash));
     };
 
     if (!window.location.hash) {
@@ -226,9 +233,9 @@ function App() {
     }
 
     loadRun(routedRunId).catch((error) => {
-      showStatus(String(error.message ?? error), "error");
+      showErrorStatus(error);
     });
-  }, [currentRun, loadRun, routedRunId, showStatus]);
+  }, [currentRun, loadRun, routedRunId, showErrorStatus]);
 
   // Active image detail object for the current route.
   const detailImage = useMemo(() => {
@@ -239,9 +246,7 @@ function App() {
   }, [currentRun, route]);
 
   // Detection list for image-detail panel and overlay drawing.
-  const detailDetections = useMemo(() => {
-    return detailImage ? detailImage.detections || [] : [];
-  }, [detailImage]);
+  const detailDetections = useMemo(() => detailImage?.detections || [], [detailImage]);
 
   useEffect(() => {
     if (route.kind === "image" && !detailImage && currentRun && currentRun.id === route.runId) {
@@ -256,9 +261,9 @@ function App() {
       setEditingDetection(null);
       await loadRuns();
     } catch (error) {
-      showStatus(String(error.message ?? error), "error");
+      showErrorStatus(error);
     }
-  }, [apiPatch, loadRuns, showStatus]);
+  }, [apiPatch, loadRuns, showErrorStatus]);
 
   // Route-derived visibility flags used by split view components.
   const isRunViewVisible = route.kind === "run";
@@ -327,16 +332,16 @@ function App() {
     if (!currentRun) {
       return;
     }
-    setHashRoute(`/run/${currentRun.id}/image/${runImageId}`);
-  }, [currentRun, setHashRoute]);
+    goToRoute(`/run/${currentRun.id}/image/${runImageId}`);
+  }, [currentRun, goToRoute]);
 
   const backToRunOrHome = useCallback(() => {
     if (currentRun) {
-      setHashRoute(`/run/${currentRun.id}`);
+      goToRoute(`/run/${currentRun.id}`);
       return;
     }
-    setHashRoute("/");
-  }, [currentRun, setHashRoute]);
+    goToRoute("/");
+  }, [currentRun, goToRoute]);
 
   const {
     onStartNewRun,
@@ -365,7 +370,7 @@ function App() {
     setIsBusy,
     setLoading,
     setEditingDetection,
-    setHashRoute,
+    goToRoute,
   });
 
   const currentRunImages = currentRun ? currentRun.images : [];
@@ -377,11 +382,33 @@ function App() {
     return Number(detection.confidence_score) >= thresholdValue;
   });
 
+  const onThresholdChange = useCallback((rawValue) => {
+    setThresholdValue(clampThreshold(rawValue));
+  }, []);
+
+  const onCloseDetectionModal = useCallback(() => {
+    setEditingDetection(null);
+  }, []);
+
+  const onSetDetectionClass = useCallback((className) => {
+    if (!editingDetection) {
+      return;
+    }
+    updateDetection(editingDetection.id, { class_name: className });
+  }, [editingDetection, updateDetection]);
+
+  const onDeleteDetection = useCallback(() => {
+    if (!editingDetection) {
+      return;
+    }
+    updateDetection(editingDetection.id, { is_deleted: true });
+  }, [editingDetection, updateDetection]);
+
   return (
     <div className="shell">
       <TopBar
-        onGoHome={() => setHashRoute("/")}
-        onGoHistory={() => setHashRoute("/history")}
+        onGoHome={() => goToRoute("/")}
+        onGoHistory={() => goToRoute("/history")}
         onAddModel={onAddModel}
         onStartNewRun={onStartNewRun}
       />
@@ -397,7 +424,7 @@ function App() {
         selectedModelFileName={selectedModelFileName}
         onModelChange={setSelectedModelFileName}
         thresholdValue={thresholdValue}
-        onThresholdChange={(rawValue) => setThresholdValue(clampThreshold(rawValue))}
+        onThresholdChange={onThresholdChange}
         onPickImages={onPickImages}
         onRunInference={onRunInference}
         onRecalculate={onRecalculate}
@@ -414,7 +441,7 @@ function App() {
         visible={isHistoryViewVisible}
         runs={runs}
         runImageUrl={runImageUrl}
-        onOpenRun={(runId) => setHashRoute(`/run/${runId}`)}
+        onOpenRun={(runId) => goToRoute(`/run/${runId}`)}
       />
 
       <ImageDetailView
@@ -440,22 +467,10 @@ function App() {
 
       <DetectionModal
         detection={editingDetection}
-        onClose={() => setEditingDetection(null)}
-        onSetLive={() => {
-          if (editingDetection) {
-            updateDetection(editingDetection.id, { class_name: "live" });
-          }
-        }}
-        onSetDead={() => {
-          if (editingDetection) {
-            updateDetection(editingDetection.id, { class_name: "dead" });
-          }
-        }}
-        onDelete={() => {
-          if (editingDetection) {
-            updateDetection(editingDetection.id, { is_deleted: true });
-          }
-        }}
+        onClose={onCloseDetectionModal}
+        onSetLive={() => onSetDetectionClass("live")}
+        onSetDead={() => onSetDetectionClass("dead")}
+        onDelete={onDeleteDetection}
       />
     </div>
   );

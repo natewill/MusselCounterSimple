@@ -23,15 +23,15 @@ function useRunActions({
   setIsBusy,
   setLoading,
   setEditingDetection,
-  setHashRoute,
+  goToRoute,
 }) {
   // Reset to a fresh run workspace and navigate back to the run page.
   const onStartNewRun = useCallback(() => {
     setCurrentRun(null);
     setPendingImagePaths([]);
     setEditingDetection(null);
-    setHashRoute("/");
-  }, [setCurrentRun, setPendingImagePaths, setEditingDetection, setHashRoute]);
+    goToRoute("/");
+  }, [setCurrentRun, setPendingImagePaths, setEditingDetection, goToRoute]);
 
   // Open native file picker for models, then refresh model list.
   const onAddModel = useCallback(async () => {
@@ -109,7 +109,7 @@ function useRunActions({
       setPendingImagePaths([]);
       setThresholdValue(clampThreshold(predictionData.run.threshold_score));
       await loadRuns();
-      setHashRoute(`/run/${predictionData.run.id}`);
+      goToRoute(`/run/${predictionData.run.id}`);
 
       const skippedImageIds = Array.isArray(predictionData.skipped_image_ids)
         ? predictionData.skipped_image_ids.length
@@ -140,7 +140,7 @@ function useRunActions({
     pollRunJobUntilDone,
     selectedModelFileName,
     setCurrentRun,
-    setHashRoute,
+    goToRoute,
     setIsBusy,
     setLoading,
     setPendingImagePaths,
