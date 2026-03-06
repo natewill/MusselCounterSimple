@@ -43,13 +43,13 @@ npm ci
 npm start
 ```
 
-## Add A Model
+## How To Use The App
+
+### Add A Model
 
 To add a model in the app, click `Add Model` in the top-right, then select your `.pt` or `.pth` file.
 
 Current support is limited to PyTorch RCNN models.
-
-## How To Use The App
 
 ### Run Page (Home Page)
 
