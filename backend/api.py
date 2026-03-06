@@ -222,7 +222,7 @@ def create_or_update_run_and_do_inference(
             skipped_images=skipped_images,
             skipped_image_ids=skipped_image_ids,
             invalid_image_ids=invalid_image_ids,
-            model_changed=using_new_model,
+            using_new_model=using_new_model,
             is_running_on_new_images_only=is_running_on_new_images_only,
             processed_run_image_ids=run_image_ids_to_process,
         )

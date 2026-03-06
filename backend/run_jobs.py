@@ -48,7 +48,7 @@ def create_run_job(
     skipped_images: list[str],
     skipped_image_ids: list[int],
     invalid_image_ids: list[int],
-    model_changed: bool,
+    using_new_model: bool,
     is_running_on_new_images_only: bool,
     processed_run_image_ids: list[int],
 ) -> dict[str, Any]:
@@ -72,7 +72,7 @@ def create_run_job(
         "skipped_images": list(skipped_images),
         "skipped_image_ids": list(skipped_image_ids),
         "invalid_image_ids": list(invalid_image_ids),
-        "model_changed": model_changed,
+        "using_new_model": using_new_model,
         "is_running_on_new_images_only": is_running_on_new_images_only,
         "processed_run_image_ids": list(processed_run_image_ids),
         "error_message": None,
