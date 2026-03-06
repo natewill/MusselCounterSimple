@@ -8,53 +8,53 @@ Mussel Counter helps automate that process by running a computer vision model (F
 
 Desktop app for running mussel detection with an Electron frontend and Python backend.
 
-![Sponsor and Advisor](docs/sponsor-advisor.png)
+<img src="docs/sponsor-advisor.png" alt="Sponsor and Advisor" width="900" />
 
 ## Why Automation Is Needed (Example Flow)
 
 ### 1) Petri Dish Context
 
-It is very tedious for researchers to count mussels one by one by hand.
+One dish can contain a huge number of juvenile mussels and debris, and counting them one-by-one takes a lot of time. This tool helps cut down that manual work and makes counting faster and more consistent.
 
-![Petri Dish Context](docs/petri-dish.png)
+<img src="docs/petri-dish.png" alt="Petri Dish Context" width="650" />
 
-### 2) Example Model Input (`IMG01455`)
+### 2) Example Model Input
 
-This is what the model gets as input.
+This is the kind of microscope image the model receives. Instead of manually reviewing every image in a batch, the app processes them automatically and gives back results you can review quickly.
 
-![Model Input IMG01455](docs/model-input-1455.jpg)
+<img src="docs/model-input-1455.jpg" alt="Example Model Input" width="650" />
 
-### 3) Example Model Output (`prediction 1455after`)
+### 3) Example Model Output
 
-This is what the model predicts as output (live/dead detections with confidence).
+This is the prediction output: each detected mussel gets a class label (`live` or `dead`) and a confidence score. That turns raw images into usable counts while still letting you inspect every prediction.
 
-![Model Output 1455](docs/model-output-1455.png)
+<img src="docs/model-output-1455.png" alt="Example Model Output" width="650" />
 
 ## App Screenshots
 
 ### Home Page
 
-This is the home page where you add images, choose a model, and start a run.
+This is the launch point for a run. You can add images, pick the model, set the threshold, and start processing in a few clicks, so the workflow stays practical for day-to-day lab use.
 
-![Home Page](docs/homepage.png)
+<img src="docs/homepage.png" alt="Home Page" width="700" />
 
 ### After A Run
 
-This is what the app looks like after the model finishes running.
+After the model finishes, the app summarizes outcomes across the run, including total images and live/dead counts, so users can move from raw image sets to clear results quickly.
 
-![After A Run](docs/after-run.png)
+<img src="docs/after-run.png" alt="After A Run" width="700" />
 
 ### Bounding Boxes After Run
 
-This view shows the model's predicted bounding boxes on the image.
+This view overlays predicted bounding boxes directly on the image, which makes the model behavior transparent and easy to audit instead of treating predictions like a black box.
 
-![Bounding Boxes After Run](docs/bounding-boxes-after-run.png)
+<img src="docs/bounding-boxes-after-run.png" alt="Bounding Boxes After Run" width="700" />
 
 ### Image Edit
 
-This is the edit view where you can change a box label or delete a box.
+This edit view keeps a human in the loop: you can correct labels or delete incorrect detections, and those edits persist in the database for reliable historical tracking.
 
-![Image Edit](docs/image-edit.png)
+<img src="docs/image-edit.png" alt="Image Edit" width="700" />
 
 ## Prerequisites
 
