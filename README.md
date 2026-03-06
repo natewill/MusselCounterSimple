@@ -2,6 +2,12 @@
 
 # Mussel Counter
 
+## Why We Made This
+
+This project was built to remove a major research bottleneck for juvenile freshwater mussel studies.  
+Before this tool, researchers had to manually inspect, classify, and count thousands of mussels in microscope images, which took extensive time and effort.  
+Mussel Counter helps automate that process by running a computer vision model (Fast R-CNN) so researchers can spend less time on manual counting and more time on conservation and analysis work.
+
 Desktop app for running mussel detection with an Electron frontend and Python backend.
 
 ## Prerequisites
