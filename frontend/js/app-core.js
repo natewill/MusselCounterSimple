@@ -318,7 +318,7 @@ function renderRunSummary() {
     elements.summaryDead.textContent = "0";
     elements.summaryTotal.textContent = "0";
     if (elements.runMetaText) {
-      elements.runMetaText.textContent = "Collection: New run";
+      elements.runMetaText.textContent = "Prediction History: New run";
     }
     if (elements.currentRunTitle) {
       elements.currentRunTitle.textContent = "New run";
@@ -337,7 +337,7 @@ function renderRunSummary() {
   elements.summaryDead.textContent = String(runData.dead_mussel_count);
   elements.summaryTotal.textContent = String(runData.total_mussels);
   if (elements.runMetaText) {
-    elements.runMetaText.textContent = `Collection: ${formatRunDisplayName(runData)}`;
+    elements.runMetaText.textContent = `Prediction History: ${formatRunDisplayName(runData)}`;
   }
   if (elements.currentRunTitle) {
     elements.currentRunTitle.textContent = `Run #${runData.id}`;

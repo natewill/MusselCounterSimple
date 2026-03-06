@@ -42,7 +42,3 @@ CREATE TABLE IF NOT EXISTS detections (
     is_deleted INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (run_image_id) REFERENCES run_images(id) ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS idx_run_images_run_id ON run_images(run_id);
-CREATE INDEX IF NOT EXISTS idx_run_images_image_id ON run_images(image_id);
-CREATE INDEX IF NOT EXISTS idx_detections_run_image_id ON detections(run_image_id);
