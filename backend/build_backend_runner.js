@@ -8,6 +8,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
+const BUILD_REQUIREMENTS_PATH = path.join(PROJECT_ROOT, "requirements-build.txt");
 
 function select_python_command() {
   // Returns the command string used to run Python
@@ -25,6 +26,24 @@ function select_python_command() {
 }
 
 const pythonCommand = select_python_command();
+
+// Ensure build-only Python tools (for example, PyInstaller) are available.
+const installBuildRequirementsResult = spawnSync(
+  pythonCommand,
+  ["-m", "pip", "install", "-r", BUILD_REQUIREMENTS_PATH],
+  {
+    cwd: PROJECT_ROOT,
+    stdio: "inherit",
+    env: process.env,
+  }
+);
+if (typeof installBuildRequirementsResult.status === "number" && installBuildRequirementsResult.status !== 0) {
+  process.exit(installBuildRequirementsResult.status);
+}
+if (installBuildRequirementsResult.error) {
+  throw installBuildRequirementsResult.error;
+}
+
 // Run the Python packager script synchronously so npm exits only after build completes.
 const result = spawnSync(pythonCommand, [path.join(__dirname, "build_backend.py")], {
   cwd: PROJECT_ROOT,
