@@ -1,4 +1,6 @@
-# Mussel Counter Simple
+![Sponsor and Advisor](docs/sponsor-advisor.png)
+
+# Mussel Counter
 
 Desktop app for running mussel detection with an Electron frontend and Python backend.
 
