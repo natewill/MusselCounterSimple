@@ -10,6 +10,52 @@ Desktop app for running mussel detection with an Electron frontend and Python ba
 
 ![Sponsor and Advisor](docs/sponsor-advisor.png)
 
+## Why Automation Is Needed (Example Flow)
+
+### 1) Petri Dish Context
+
+It is very tedious for researchers to count mussels one by one by hand.
+
+![Petri Dish Context](docs/petri-dish.png)
+
+### 2) Example Model Input (`IMG01455`)
+
+This is what the model gets as input.
+
+![Model Input IMG01455](docs/model-input-1455.jpg)
+
+### 3) Example Model Output (`prediction 1455after`)
+
+This is what the model predicts as output (live/dead detections with confidence).
+
+![Model Output 1455](docs/model-output-1455.png)
+
+## App Screenshots
+
+### Home Page
+
+This is the home page where you add images, choose a model, and start a run.
+
+![Home Page](docs/homepage.png)
+
+### After A Run
+
+This is what the app looks like after the model finishes running.
+
+![After A Run](docs/after-run.png)
+
+### Bounding Boxes After Run
+
+This view shows the model's predicted bounding boxes on the image.
+
+![Bounding Boxes After Run](docs/bounding-boxes-after-run.png)
+
+### Image Edit
+
+This is the edit view where you can change a box label or delete a box.
+
+![Image Edit](docs/image-edit.png)
+
 ## Prerequisites
 
 - Node.js 20+
