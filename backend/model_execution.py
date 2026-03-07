@@ -1,9 +1,9 @@
-"""Faster R-CNN inference + database writeback helpers.
+"""Faster R-CNN model_execution + database writeback helpers.
 
-This module handles the full backend inference path:
+This module handles the full backend model_execution path:
 - Resolve and validate the requested model file path.
 - Load and cache the RCNN model by file modified-time.
-- Run per-image inference and normalize detections into DB-friendly fields.
+- Run per-image model_execution and normalize detections into DB-friendly fields.
 - Replace detections/counts for each `run_images` row being processed.
 """
 
@@ -31,7 +31,7 @@ MODEL_CACHE: dict[str, tuple[float, Any, Any]] = {}
 
 
 def _model_file_name_to_absolute_path(model_file_name: str) -> Path:
-    """Return a validated absolute model path for inference.
+    """Return a validated absolute model path for model_execution.
 
     Requirements:
     - Input must already be absolute (frontend provides full path).
@@ -115,7 +115,7 @@ def _get_model_device(model_file_name: str) -> tuple[Any, Any]:
     return model, device
 
 
-def _run_rcnn_inference(model_device_tuple: tuple[Any, Any], image_path: str) -> list[dict[str, Any]]:
+def _run_rcnn_model_execution(model_device_tuple: tuple[Any, Any], image_path: str) -> list[dict[str, Any]]:
     """Run RCNN on one image and return standardized detection records.
 
     Output records are normalized to the detection table fields:
@@ -155,21 +155,21 @@ def _run_rcnn_inference(model_device_tuple: tuple[Any, Any], image_path: str) ->
             }
         )
 
-    # Keep GPU memory stable across repeated inference calls.
+    # Keep GPU memory stable across repeated model_execution calls.
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
     return detections
 
 
-def run_rcnn_inference_for_run_images(
+def run_rcnn_model_execution_for_run_images(
     database_connection: sqlite3.Connection,
     run_image_ids: list[int],
     model_file_name: str,
     threshold_score: float,
     on_run_image_processed: Callable[[int, int], None] | None = None,
 ) -> None:
-    """Run inference for selected `run_images` rows and write results to DB.
+    """Run model_execution for selected `run_images` rows and write results to DB.
 
     For each `run_image_id`:
     - Load image path from DB.
@@ -184,7 +184,7 @@ def run_rcnn_inference_for_run_images(
 
     model_device_tuple = _get_model_device(model_file_name)
     placeholders = ",".join(["?"] * len(run_image_ids))
-    # Pull run-image rows with physical file path for inference.
+    # Pull run-image rows with physical file path for model_execution.
     run_images_from_database = database_connection.execute(
         f"""
         SELECT
@@ -202,7 +202,7 @@ def run_rcnn_inference_for_run_images(
     for processed_images, run_image_from_database in enumerate(run_images_from_database, start=1):
         run_image_id = int(run_image_from_database["run_image_id"])
         image_path = str(run_image_from_database["stored_path"])
-        detections = _run_rcnn_inference(model_device_tuple, image_path)
+        detections = _run_rcnn_model_execution(model_device_tuple, image_path)
 
         # Replace prior detections so reruns are deterministic per run-image row.
         database_connection.execute(

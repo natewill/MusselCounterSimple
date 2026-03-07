@@ -1,6 +1,6 @@
 """In-memory run-job state used by `/predict` progress polling.
 
-This module tracks exactly one active inference run at a time. A "run job"
+This module tracks exactly one active model_execution run at a time. A "run job"
 represents the current background model execution and stores:
 - Progress counters (`processed_images`, `total_images`)
 - Lifecycle status (`running`, `completed`, `failed`)
@@ -42,6 +42,11 @@ def get_current_run_job() -> dict[str, Any] | None:
         return deepcopy(_RUN_JOB_DATA)
 
 
+def is_a_run_job_already_running() -> bool:
+    """Return whether a run job is currently active."""
+    return get_current_run_job() is not None
+
+
 def create_run_job(
     run_id: int,
     total_images: int,
@@ -49,7 +54,6 @@ def create_run_job(
     skipped_image_ids: list[int],
     invalid_image_ids: list[int],
     using_new_model: bool,
-    is_running_on_new_images_only: bool,
     processed_run_image_ids: list[int],
 ) -> dict[str, Any]:
     """Create a new run job and set it as the current active job.
@@ -73,7 +77,6 @@ def create_run_job(
         "skipped_image_ids": list(skipped_image_ids),
         "invalid_image_ids": list(invalid_image_ids),
         "using_new_model": using_new_model,
-        "is_running_on_new_images_only": is_running_on_new_images_only,
         "processed_run_image_ids": list(processed_run_image_ids),
         "error_message": None,
         "run": None,
@@ -82,7 +85,7 @@ def create_run_job(
     }
 
     with _RUN_JOB_LOCK:
-        # Keep backend behavior simple: only one concurrent inference job.
+        # Keep backend behavior simple: only one concurrent model_execution job.
         if _RUN_JOB_DATA is not None and _RUN_JOB_DATA["status"] == "running":
             raise RuntimeError("A run job is already running.")
         _RUN_JOB_DATA = run_job_data
